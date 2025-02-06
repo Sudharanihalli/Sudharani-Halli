@@ -1,0 +1,84 @@
+AI-Powered Chatbot for Supplier and Product Information
+
+—--->from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+DATABASE_URL = "postgresql://user:password@localhost/dbname"
+
+Base = declarative_base()
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+
+class Product(Base):
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    brand = Column(String)
+    category = Column(String)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"))
+
+class Supplier(Base):
+    __tablename__ = "suppliers"
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    contact_info = Column(String)
+
+Base.metadata.create_all(engine)
+
+—------> Creation of a Simple FastAPI Server
+
+from fastapi import FastAPI, Query
+from sqlalchemy.orm import Session
+from transformers import pipeline
+
+app = FastAPI()
+
+# LLM for summarization
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+
+# Get Database Session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# API to fetch products by brand
+@app.get("/products/")
+def get_products(brand: str, db: Session = next(get_db())):
+    products = db.query(Product).filter(Product.brand == brand).all()
+    product_details = [{"id": p.id, "name": p.name, "category": p.category} for p in products]
+
+    # Summarize the data using LLM
+    summary = summarizer(str(product_details), max_length=50, min_length=10, do_sample=False)[0]['summary_text']
+    
+    return {"products": product_details, "summary": summary}
+
+—----->>> Creation of a Chat UI
+
+import React, { useState } from "react";
+import axios from "axios";
+import { TextField, Button, List, ListItem } from "@mui/material";
+
+function App() {
+  const [query, setQuery] = useState("");
+  const [response, setResponse] = useState("");
+
+  const handleSearch = async () => {
+    const res = await axios.get(`http://localhost:8000/products/?brand=${query}`);
+    setResponse(res.data.summary);
+  };
+
+  return (
+    <div style={{ padding: "20px" }}>
+      <TextField label="Enter Brand" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <Button variant="contained" onClick={handleSearch} style={{ marginLeft: "10px" }}>Search</Button>
+      <List>
+        <ListItem>{response}</ListItem>
+      </List>
+    </div>
+  );
+}
+
+export default App;
